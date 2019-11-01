@@ -13,6 +13,8 @@
 
 #import "objc/runtime.h"
 
+#import "RCNARScene.h"
+
 static NSTimer *keyboardTimer;
 static NSString *const MessageHandlerName = @"ReactNativeWebView";
 static NSURLCredential* clientAuthenticationCredential;
@@ -50,6 +52,7 @@ static NSDictionary* customCertificatesForHost;
 @property (nonatomic, copy) RCTDirectEventBlock onScroll;
 @property (nonatomic, copy) RCTDirectEventBlock onContentProcessDidTerminate;
 @property (nonatomic, copy) WKWebView *webView;
+@property (nonatomic, copy) RCNARScene *arScene;
 @end
 
 @implementation RNCWebView
@@ -244,7 +247,7 @@ static NSDictionary* customCertificatesForHost;
     }
 
     _webView = [[WKWebView alloc] initWithFrame:self.bounds configuration: wkWebViewConfig];
-    [self setBackgroundColor: _savedBackgroundColor];
+    [self setBackgroundColor: [UIColor clearColor]]; // override clear background
     _webView.scrollView.delegate = self;
     _webView.UIDelegate = self;
     _webView.navigationDelegate = self;
@@ -266,7 +269,19 @@ static NSDictionary* customCertificatesForHost;
       _webView.scrollView.contentInsetAdjustmentBehavior = _savedContentInsetAdjustmentBehavior;
     }
 #endif
+      
+    // initialize AR scene
+    _arScene = [[RCNARScene alloc] init];
+    _arScene.translatesAutoresizingMaskIntoConstraints = NO;
 
+    [self addSubview:_arScene];
+    [_arScene.topAnchor constraintEqualToAnchor:self.topAnchor].active = YES;
+    [_arScene.leftAnchor constraintEqualToAnchor:self.leftAnchor].active = YES;
+    [_arScene.bottomAnchor constraintEqualToAnchor:self.bottomAnchor].active = YES;
+    [_arScene.rightAnchor constraintEqualToAnchor:self.rightAnchor].active = YES;
+    [_arScene setup];
+
+    // add webview in front
     [self addSubview:_webView];
     [self setHideKeyboardAccessoryView: _savedHideKeyboardAccessoryView];
     [self setKeyboardDisplayRequiresUserAction: _savedKeyboardDisplayRequiresUserAction];
@@ -892,7 +907,7 @@ static NSDictionary* customCertificatesForHost;
         _onHttpError(event);
       }
     }
-  }  
+  }
 
   decisionHandler(WKNavigationResponsePolicyAllow);
 }
