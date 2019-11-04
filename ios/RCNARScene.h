@@ -8,6 +8,7 @@
 
 #import <UIKit/UIKit.h>
 #import <ARKit/ARKit.h>
+#import <WebKit/WebKit.h>
 #import <SceneKit/SceneKit.h>
 
 #ifndef RCNARScene_h
@@ -16,6 +17,8 @@
 @interface RCNARScene : ARSCNView
 
 - (void)setup;
+
+- (void)onMessage:( NSMutableDictionary<NSString *, id>* ) message;
 
 @end
 

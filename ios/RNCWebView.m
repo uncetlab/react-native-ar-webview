@@ -16,7 +16,7 @@
 #import "RCNARScene.h"
 
 static NSTimer *keyboardTimer;
-static NSString *const MessageHandlerName = @"ReactNativeWebView";
+static NSString *const MessageHandlerName = @"ARView";
 static NSURLCredential* clientAuthenticationCredential;
 static NSDictionary* customCertificatesForHost;
 
@@ -155,7 +155,7 @@ static NSDictionary* customCertificatesForHost;
     }
     wkWebViewConfig.userContentController = [WKUserContentController new];
 
-    if (_messagingEnabled) {
+    if (_messagingEnabled || true) { // Messaging always enabled for 3D content
       [wkWebViewConfig.userContentController addScriptMessageHandler:self name:MessageHandlerName];
 
       NSString *source = [NSString stringWithFormat:
@@ -405,9 +405,10 @@ static NSDictionary* customCertificatesForHost;
 - (void)userContentController:(WKUserContentController *)userContentController
        didReceiveScriptMessage:(WKScriptMessage *)message
 {
+  NSMutableDictionary<NSString *, id> *event = [self baseEvent];
+  [event addEntriesFromDictionary: @{@"data": message.body}];
+  [_arScene onMessage:event];
   if (_onMessage != nil) {
-    NSMutableDictionary<NSString *, id> *event = [self baseEvent];
-    [event addEntriesFromDictionary: @{@"data": message.body}];
     _onMessage(event);
   }
 }

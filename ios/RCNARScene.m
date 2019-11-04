@@ -40,4 +40,8 @@ bool _sceneSet = NO;
     _sceneSet = YES;
 }
 
+- (void)onMessage:( NSMutableDictionary<NSString *, id>* )message {
+   NSLog(@"Received ARView event: %@", [message description]);
+}
+
 @end
