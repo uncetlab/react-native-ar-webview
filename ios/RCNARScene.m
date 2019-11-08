@@ -18,6 +18,8 @@
 @implementation RCNARScene
 
 bool _sceneSet = NO;
+ARPlaneAnchor *_planeAnchor;
+SCNScene *_loadedScene;
 
 - (void)setup
 {
@@ -31,7 +33,10 @@ bool _sceneSet = NO;
                                                              diskPath:nil];
     [NSURLCache setSharedURLCache:URLCache];
     
+    self.delegate = self;
+    self.debugOptions = ARSCNDebugOptionShowFeaturePoints;
     self.autoenablesDefaultLighting = YES;
+    self.automaticallyUpdatesLighting = YES;
     
     SCNScene *scene = [SCNScene new];
     self.scene = scene;
@@ -49,18 +54,31 @@ bool _sceneSet = NO;
 
 - (void)initSceneFromUrl:(NSURL*) url {
     [[self class] downloadAssetURL:url completionHandler:^(NSURL* location) {
-        MDLAsset *asset = [[MDLAsset alloc] initWithURL:location];
-        self.scene = [SCNScene sceneWithMDLAsset:asset];
+        NSError *sceneError = nil;
+        _loadedScene = [SCNScene sceneWithURL:location options:nil error:&sceneError];
+        [self showLoadedSceneObjects];
+        if(sceneError){
+            NSLog(@"Scene error!!! %@", sceneError);
+        }
     }];
 }
 
-- (void)addObjectsFromUrl:(NSURL*) url {
-    [[self class] downloadAssetURL:url completionHandler:^(NSURL* location) {
-        MDLAsset *assets = [[MDLAsset alloc] initWithURL:location];
-        for(id object in assets){
-            [self.scene.rootNode addChildNode:[SCNNode nodeWithMDLObject:object]];
+- (void)showLoadedSceneObjects {
+    if(_loadedScene && _planeAnchor){
+        for(SCNNode *node in _loadedScene.rootNode.childNodes){
+            node.simdPosition = _planeAnchor.center;
+            node.simdTransform = _planeAnchor.transform;
+            node.scale = SCNVector3Make(0.01, 0.01, 0.01);
+            [self.scene.rootNode addChildNode:node];
         }
-    }];
+    }else{
+        if(_planeAnchor)
+            NSLog(@"Have anchor, waiting for scene...");
+        else if(_loadedScene)
+            NSLog(@"Have scene, waiting for anchor...");
+        else
+            NSLog(@"Waiting for scene and anchor");
+    }
 }
     
 
@@ -95,6 +113,40 @@ bool _sceneSet = NO;
         NSLog(@"Error: Unrecognized action: %@", action);
     }
 }
+
+/**
+ * SceneKit delegate methods
+**/
+- (void)renderer:(id<SCNSceneRenderer>)renderer didAddNode:(SCNNode *)node forAnchor:(ARAnchor *)anchor  API_AVAILABLE(ios(11.0)){
+    NSLog(@"Adding node! %@", anchor);
+    if (_planeAnchor || ![anchor isKindOfClass:[ARPlaneAnchor class]]) {
+      return;
+    }
+    ARPlaneAnchor *plane = (ARPlaneAnchor*)anchor;
+    _planeAnchor = plane;
+    
+//    SCNPlane *planeGeometry = [SCNPlane planeWithWidth:plane.extent.x height:plane.extent.z];
+//    planeGeometry.materials.firstObject.diffuse.contents = [UIColor  colorWithRed:0.2 green:0.2 blue:0.2 alpha:1];
+//    
+//    SCNNode *planeNode = [SCNNode nodeWithGeometry:planeGeometry];
+//    planeNode.opacity = 0.75;
+//    // Move the plane to the position reported by ARKit
+//    planeNode.simdPosition = plane.center;
+//    planeNode.simdTransform = plane.transform;
+//    // Planes in SceneKit are vertical by default so we need to rotate
+//    // 90 degrees to match planes in ARKit
+//    planeNode.eulerAngles = SCNVector3Make(-M_PI_2, 0.0, 0.0);
+//    
+//    [self.scene.rootNode addChildNode:planeNode];
+    
+    [self showLoadedSceneObjects];
+}
+
+- (void)renderer:(id<SCNSceneRenderer>)renderer didRemoveNode:(SCNNode *)node forAnchor:(ARAnchor *)anchor  API_AVAILABLE(ios(11.0)){
+    NSLog(@"Removed node! %@", node);
+    NSLog(@"On anchor: %@", anchor);
+}
+
 
 /**
 * Helpers

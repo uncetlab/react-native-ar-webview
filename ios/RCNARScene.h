@@ -14,7 +14,7 @@
 #ifndef RCNARScene_h
 #define RCNARScene_h
 
-@interface RCNARScene : ARSCNView
+@interface RCNARScene : ARSCNView <ARSCNViewDelegate>
 
 - (void)setup;
 
