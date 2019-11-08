@@ -11,10 +11,14 @@
 #import <WebKit/WebKit.h>
 #import <SceneKit/SceneKit.h>
 
+#import "RNCWebView.h"
+
 #ifndef RCNARScene_h
 #define RCNARScene_h
 
 @interface RCNARScene : ARSCNView <ARSCNViewDelegate>
+
+@property (nonatomic, weak) RNCWebView*  webview;
 
 - (void)setup;
 

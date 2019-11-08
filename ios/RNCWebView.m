@@ -161,7 +161,11 @@ static NSDictionary* customCertificatesForHost;
       NSString *source = [NSString stringWithFormat:
         @"window.%@ = {"
          "  postMessage: function (data) {"
-         "    window.webkit.messageHandlers.%@.postMessage(String(data));"
+         "    window.webkit.messageHandlers.%@.postMessage(data);"
+         "  },"
+         "  listeners: [],"
+         "  onMessage: function (listener) {"
+         "    this.listeners.push(listener);"
          "  }"
          "};", MessageHandlerName, MessageHandlerName
       ];
@@ -272,6 +276,7 @@ static NSDictionary* customCertificatesForHost;
       
     // initialize AR scene
     _arScene = [[RCNARScene alloc] init];
+    _arScene.webview = self;
     _arScene.translatesAutoresizingMaskIntoConstraints = NO;
 
     [self addSubview:_arScene];
@@ -411,6 +416,28 @@ static NSDictionary* customCertificatesForHost;
   if (_onMessage != nil) {
     _onMessage(event);
   }
+}
+
+/**
+ * Call this method to send data back to the web view
+ */
+- (void)sendScriptMessage:(NSDictionary<NSString *, id> *)data {
+    NSError *jsonError = nil;
+    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:data options:0 error:&jsonError];
+    
+    if (! jsonData || jsonError) {
+        NSLog(@"Bad JSON sent to sendScriptMessage: %@", jsonError);
+        return;
+    }
+    NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+    
+    NSString *source = [NSString stringWithFormat:
+      @"window.%@.listeners.map( l => l(%@) );", MessageHandlerName, jsonString
+    ];
+    NSLog(@"Preparing to send JS message: \n %@", source);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self->_webView evaluateJavaScript:source completionHandler:nil];
+    });
 }
 
 - (void)setSource:(NSDictionary *)source

@@ -61,4 +61,6 @@
 - (void)reload;
 - (void)stopLoading;
 
+- (void)sendScriptMessage:(NSDictionary<NSString *, id> *)data;
+
 @end

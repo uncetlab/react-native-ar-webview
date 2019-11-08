@@ -56,21 +56,36 @@ SCNScene *_loadedScene;
     [[self class] downloadAssetURL:url completionHandler:^(NSURL* location) {
         NSError *sceneError = nil;
         _loadedScene = [SCNScene sceneWithURL:location options:nil error:&sceneError];
-        [self showLoadedSceneObjects];
+        // [self placeLoadedSceneObjects];
+        
+        if(_planeAnchor){
+            [self sendMessage:@{
+              @"event": @"plane"
+            }];
+        }
+        
         if(sceneError){
             NSLog(@"Scene error!!! %@", sceneError);
         }
     }];
 }
 
-- (void)showLoadedSceneObjects {
+- (void)placeLoadedSceneObjects {
     if(_loadedScene && _planeAnchor){
+        NSLog(@"Placing objects...");
         for(SCNNode *node in _loadedScene.rootNode.childNodes){
             node.simdPosition = _planeAnchor.center;
             node.simdTransform = _planeAnchor.transform;
             node.scale = SCNVector3Make(0.01, 0.01, 0.01);
             [self.scene.rootNode addChildNode:node];
         }
+        
+        [self sendMessage:@{
+          @"event": @"rendered",
+          @"extra": @"data",
+          @"statusCode": @200
+        }];
+        
     }else{
         if(_planeAnchor)
             NSLog(@"Have anchor, waiting for scene...");
@@ -81,6 +96,9 @@ SCNScene *_loadedScene;
     }
 }
     
+- (void)sendMessage:(NSDictionary<NSString *, id>*)message {
+    [self.webview sendScriptMessage:message];
+}
 
 - (void)onMessage:( NSMutableDictionary<NSString *, id>* )message {
     if(![message objectForKey:@"data"] || ![message[@"data"] isKindOfClass:[NSDictionary class]]){
@@ -109,6 +127,9 @@ SCNScene *_loadedScene;
         }
         
         [self initSceneFromUrl:url];
+    }else if([action isEqualToString:@"place"]){
+        NSLog(@"Attempting to place object...");
+        [self placeLoadedSceneObjects];
     }else{
         NSLog(@"Error: Unrecognized action: %@", action);
     }
@@ -139,7 +160,12 @@ SCNScene *_loadedScene;
 //    
 //    [self.scene.rootNode addChildNode:planeNode];
     
-    [self showLoadedSceneObjects];
+//    [self placeLoadedSceneObjects];
+    if(_loadedScene){
+        [self sendMessage:@{
+          @"event": @"plane"
+        }];
+    }
 }
 
 - (void)renderer:(id<SCNSceneRenderer>)renderer didRemoveNode:(SCNNode *)node forAnchor:(ARAnchor *)anchor  API_AVAILABLE(ios(11.0)){
