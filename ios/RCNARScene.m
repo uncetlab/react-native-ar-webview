@@ -14,15 +14,15 @@
 
 #import "RCNARScene.h"
 
-
+API_AVAILABLE(ios(11.0))
 @implementation RCNARScene
 
 bool _sceneSet = NO;
 ARPlaneAnchor *_planeAnchor;
 SCNScene *_loadedScene;
+NSDictionary<NSString *, id> *_initOptions;
 
-- (void)setup
-{
+- (void)setup API_AVAILABLE(ios(11.0)){
     if(_sceneSet){
         return;
     }
@@ -52,7 +52,7 @@ SCNScene *_loadedScene;
     _sceneSet = YES;
 }
 
-- (void)initSceneFromUrl:(NSURL*) url {
+- (void)initSceneFromUrl:(NSURL*) url API_AVAILABLE(ios(11.0)){
     [[self class] downloadAssetURL:url completionHandler:^(NSURL* location) {
         NSError *sceneError = nil;
         _loadedScene = [SCNScene sceneWithURL:location options:nil error:&sceneError];
@@ -70,13 +70,14 @@ SCNScene *_loadedScene;
     }];
 }
 
-- (void)placeLoadedSceneObjects {
+- (void)placeLoadedSceneObjects API_AVAILABLE(ios(11.0)){
     if(_loadedScene && _planeAnchor){
         NSLog(@"Placing objects...");
+        float scale = _initOptions[@"scale"] || 1.0;
         for(SCNNode *node in _loadedScene.rootNode.childNodes){
             node.simdPosition = _planeAnchor.center;
             node.simdTransform = _planeAnchor.transform;
-            node.scale = SCNVector3Make(0.01, 0.01, 0.01);
+            node.scale = SCNVector3Make(scale, scale, scale);
             [self.scene.rootNode addChildNode:node];
         }
         
@@ -114,15 +115,16 @@ SCNScene *_loadedScene;
     
     NSString *action = message[@"data"][@"action"];
     if([action isEqualToString:@"init"]){
-        NSString *urlStr = message[@"data"][@"url"];
-        if(!urlStr){
+        _initOptions = message[@"data"][@"options"];
+        
+        if(!_initOptions || !_initOptions[@"url"]){
             NSLog(@"Error: Action is init, but no URL was provided.");
             return;
         }
         
-        NSURL *url = [NSURL URLWithString:urlStr];
+        NSURL *url = [NSURL URLWithString:_initOptions[@"url"]];
         if(!url){
-            NSLog(@"Error: Malformed URL for '%@' action: %@ ", action, urlStr);
+            NSLog(@"Error: Malformed URL for '%@' action: %@ ", action, _initOptions[@"url"]);
             return;
         }
         
