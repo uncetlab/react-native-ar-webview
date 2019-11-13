@@ -20,6 +20,7 @@ API_AVAILABLE(ios(11.0))
 bool _sceneSet = NO;
 ARPlaneAnchor *_planeAnchor;
 SCNScene *_loadedScene;
+ARCoachingOverlayView *_arCoachingOverlay;
 NSDictionary<NSString *, id> *_initOptions;
 
 - (void)setup API_AVAILABLE(ios(11.0)){
@@ -50,9 +51,31 @@ NSDictionary<NSString *, id> *_initOptions;
     
     [self.session runWithConfiguration:configuration];
     _sceneSet = YES;
+    
+    NSLog(@"InitOptions %@", _initOptions);
+}
+
+- (void)setupCoachingOverlay API_AVAILABLE(ios(13.0)) {
+    _arCoachingOverlay = [[ARCoachingOverlayView alloc] init];
+    _arCoachingOverlay.session = self.session;
+    _arCoachingOverlay.activatesAutomatically = YES;
+    _arCoachingOverlay.goal = ARPlaneDetectionHorizontal;
+    
+    _arCoachingOverlay.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.superview addSubview:_arCoachingOverlay];
+    
+    [_arCoachingOverlay.topAnchor constraintEqualToAnchor:self.topAnchor].active = YES;
+    [_arCoachingOverlay.leftAnchor constraintEqualToAnchor:self.leftAnchor].active = YES;
+    [_arCoachingOverlay.bottomAnchor constraintEqualToAnchor:self.bottomAnchor].active = YES;
+    [_arCoachingOverlay.rightAnchor constraintEqualToAnchor:self.rightAnchor].active = YES;
 }
 
 - (void)initSceneFromUrl:(NSURL*) url API_AVAILABLE(ios(11.0)){
+    // Only enable coaching overlay if enabled, and iOS > v13
+    if([_initOptions objectForKey:@"coachingOverlay"])
+        if(@available(iOS 13, *))
+           [self setupCoachingOverlay];
+    
     [[self class] downloadAssetURL:url completionHandler:^(NSURL* location) {
         NSError *sceneError = nil;
         _loadedScene = [SCNScene sceneWithURL:location options:nil error:&sceneError];
