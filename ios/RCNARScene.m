@@ -74,7 +74,12 @@ int _updateCounter = 0;
 }
 
 - (void)setupRaycastPoint {
-    _placeMarker = [SCNNode nodeWithGeometry:[SCNBox boxWithWidth:0.1 height:0.025 length:0.1 chamferRadius:0.0]];
+    SCNPlane *plane = [SCNPlane planeWithWidth:0.25 height:0.25];
+    plane.firstMaterial.diffuse.contents = UIColor.blackColor;
+    plane.cornerRadius = 0.25;
+    _placeMarker = [SCNNode nodeWithGeometry:plane];
+    _placeMarker.eulerAngles = SCNVector3Make(-M_PI_2, 0, 0);
+    _placeMarker.opacity = 0.75;
     [self updateRaycastPoint];
     [self.scene.rootNode addChildNode:_placeMarker];
 }
@@ -118,10 +123,13 @@ int _updateCounter = 0;
 - (void)placeLoadedSceneObjects API_AVAILABLE(ios(11.0)){
     if(_loadedScene && _planeAnchor){
         NSLog(@"Placing objects...");
+        
+        float camAngle = self.session.currentFrame.camera.eulerAngles[1];
         float scale = _initOptions[@"scale"] || 1.0;
         for(SCNNode *node in _loadedScene.rootNode.childNodes){
             node.position = _placement;
             node.scale = SCNVector3Make(scale, scale, scale);
+            node.eulerAngles = SCNVector3Make(0, camAngle, 0);
             [self.scene.rootNode addChildNode:node];
         }
         
