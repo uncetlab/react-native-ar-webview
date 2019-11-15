@@ -18,10 +18,17 @@ API_AVAILABLE(ios(11.0))
 @implementation RCNARScene
 
 bool _sceneSet = NO;
+bool _hasItem = NO;
+
 ARPlaneAnchor *_planeAnchor;
 SCNScene *_loadedScene;
 ARCoachingOverlayView *_arCoachingOverlay;
 NSDictionary<NSString *, id> *_initOptions;
+SCNNode *_placeMarker = nil;
+SCNVector3 _placement;
+CGFloat center_x = 0.0;
+CGFloat center_y = 0.0;
+int _updateCounter = 0;
 
 - (void)setup API_AVAILABLE(ios(11.0)){
     if(_sceneSet){
@@ -41,10 +48,6 @@ NSDictionary<NSString *, id> *_initOptions;
     
     SCNScene *scene = [SCNScene new];
     self.scene = scene;
-    
-//    let cubeNode = SCNNode(geometry: SCNBox(width: 0.1, height: 0.1, length: 0.1, chamferRadius: 0))
-//    cubeNode.position = SCNVector3(0, 0, -0.2) // SceneKit/AR coordinates are in meters
-//    sceneView.scene.rootNode.addChildNode(cubeNode)
 
     ARWorldTrackingConfiguration *configuration = [ARWorldTrackingConfiguration new];
     configuration.planeDetection = ARPlaneDetectionHorizontal;
@@ -70,7 +73,26 @@ NSDictionary<NSString *, id> *_initOptions;
     [_arCoachingOverlay.rightAnchor constraintEqualToAnchor:self.rightAnchor].active = YES;
 }
 
+- (void)setupRaycastPoint {
+    _placeMarker = [SCNNode nodeWithGeometry:[SCNBox boxWithWidth:0.1 height:0.025 length:0.1 chamferRadius:0.0]];
+    [self updateRaycastPoint];
+    [self.scene.rootNode addChildNode:_placeMarker];
+}
+
+- (void)updateRaycastPoint {
+    ARRaycastQuery *query = [self raycastQueryFromPoint:CGPointMake(center_x,center_y) allowingTarget:ARHitTestResultTypeEstimatedHorizontalPlane alignment:ARRaycastTargetAlignmentHorizontal];
+    NSArray<ARRaycastResult *> *results = [self.session raycast:query];
+   
+    if(results && [results count]){
+        _placement = SCNVector3Make(results[0].worldTransform.columns[3].x, results[0].worldTransform.columns[3].y, results[0].worldTransform.columns[3].z);
+        _placeMarker.position = _placement;
+    }
+}
+
 - (void)initSceneFromUrl:(NSURL*) url API_AVAILABLE(ios(11.0)){
+    center_x = self.bounds.origin.x + self.bounds.size.width/2.0;
+    center_y = self.bounds.origin.y + self.bounds.size.height/2.0;
+    
     // Only enable coaching overlay if enabled, and iOS > v13
     if([_initOptions objectForKey:@"coachingOverlay"])
         if(@available(iOS 13, *))
@@ -98,11 +120,16 @@ NSDictionary<NSString *, id> *_initOptions;
         NSLog(@"Placing objects...");
         float scale = _initOptions[@"scale"] || 1.0;
         for(SCNNode *node in _loadedScene.rootNode.childNodes){
-            node.simdPosition = _planeAnchor.center;
-            node.simdTransform = _planeAnchor.transform;
+            node.position = _placement;
             node.scale = SCNVector3Make(scale, scale, scale);
             [self.scene.rootNode addChildNode:node];
         }
+        
+        if(_placeMarker){
+            [_placeMarker removeFromParentNode];
+            _placeMarker = nil;
+        }
+        _hasItem = YES;
         
         [self sendMessage:@{
           @"event": @"rendered",
@@ -160,32 +187,24 @@ NSDictionary<NSString *, id> *_initOptions;
     }
 }
 
+// MARK: - ARSCNViewDelegate
+
 /**
  * SceneKit delegate methods
 **/
 - (void)renderer:(id<SCNSceneRenderer>)renderer didAddNode:(SCNNode *)node forAnchor:(ARAnchor *)anchor  API_AVAILABLE(ios(11.0)){
-    NSLog(@"Adding node! %@", anchor);
+    
     if (_planeAnchor || ![anchor isKindOfClass:[ARPlaneAnchor class]]) {
       return;
     }
     ARPlaneAnchor *plane = (ARPlaneAnchor*)anchor;
     _planeAnchor = plane;
     
-//    SCNPlane *planeGeometry = [SCNPlane planeWithWidth:plane.extent.x height:plane.extent.z];
-//    planeGeometry.materials.firstObject.diffuse.contents = [UIColor  colorWithRed:0.2 green:0.2 blue:0.2 alpha:1];
-//    
-//    SCNNode *planeNode = [SCNNode nodeWithGeometry:planeGeometry];
-//    planeNode.opacity = 0.75;
-//    // Move the plane to the position reported by ARKit
-//    planeNode.simdPosition = plane.center;
-//    planeNode.simdTransform = plane.transform;
-//    // Planes in SceneKit are vertical by default so we need to rotate
-//    // 90 degrees to match planes in ARKit
-//    planeNode.eulerAngles = SCNVector3Make(-M_PI_2, 0.0, 0.0);
-//    
-//    [self.scene.rootNode addChildNode:planeNode];
+    if(_placeMarker)
+        [self updateRaycastPoint];
+    else if(!_hasItem)
+        [self setupRaycastPoint];
     
-//    [self placeLoadedSceneObjects];
     if(_loadedScene){
         [self sendMessage:@{
           @"event": @"plane"
@@ -198,10 +217,13 @@ NSDictionary<NSString *, id> *_initOptions;
     NSLog(@"On anchor: %@", anchor);
 }
 
+- (void)renderer:(id<SCNSceneRenderer>)renderer updateAtTime:(NSTimeInterval)time {
+    if(_placeMarker != nil)
+        [self updateRaycastPoint];
+}
 
-/**
-* Helpers
-**/
+
+// MARK: - RCNARScene Helpers
 
 + (void)downloadAssetURL:(NSURL*)remoteUrl completionHandler:(void(^)(NSURL*))handler {
     NSURL *cachedFileUrl = [[self class] checkCacheForURL:remoteUrl];
