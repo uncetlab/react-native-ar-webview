@@ -284,7 +284,7 @@ static NSDictionary* customCertificatesForHost;
     [_arScene.leftAnchor constraintEqualToAnchor:self.leftAnchor].active = YES;
     [_arScene.bottomAnchor constraintEqualToAnchor:self.bottomAnchor].active = YES;
     [_arScene.rightAnchor constraintEqualToAnchor:self.rightAnchor].active = YES;
-    [_arScene setup];
+    [_arScene start];
 
     // add webview in front
     [self addSubview:_webView];
@@ -309,6 +309,10 @@ static NSDictionary* customCertificatesForHost;
         [_webView removeFromSuperview];
         _webView.scrollView.delegate = nil;
         _webView = nil;
+    }
+    
+    if(_arScene){
+        [_arScene pause];
     }
 
     [super removeFromSuperview];

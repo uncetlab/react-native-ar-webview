@@ -11,55 +11,62 @@
 #import <ARKit/ARKit.h>
 #import <SceneKit/SceneKit.h>
 #import <SceneKit/ModelIO.h>
-
+#include <math.h>
 #import "RCNARScene.h"
 
-API_AVAILABLE(ios(11.0))
+API_AVAILABLE(ios(13.0))
 @implementation RCNARScene
 
-bool _sceneSet = NO;
+bool _sceneReady = NO;
 bool _hasItem = NO;
+NSString* _currentItem = nil;
 
-ARPlaneAnchor *_planeAnchor;
-SCNScene *_loadedScene;
+NSURLCache *_urlCache = nil;
+ARWorldTrackingConfiguration *_configuration = nil;
+NSMutableDictionary<NSString *,SCNScene*> *_loadedScenes;
 ARCoachingOverlayView *_arCoachingOverlay;
-NSDictionary<NSString *, id> *_initOptions;
 SCNNode *_placeMarker = nil;
-SCNVector3 _placement;
+simd_float3 _placement;
 CGFloat center_x = 0.0;
 CGFloat center_y = 0.0;
+CGFloat _camAngle = NAN;
 int _updateCounter = 0;
 
-- (void)setup API_AVAILABLE(ios(11.0)){
-    if(_sceneSet){
-        return;
+- (void)start {
+    NSLog(@"Running AR...");
+    if(!_urlCache){
+        _urlCache = [[NSURLCache alloc] initWithMemoryCapacity: 25 * 1024 * 1024 // 25mb (~1 model)
+                                                             diskCapacity: 100 * 1024 * 1024 // 100mb (~4 models)
+                                                                 diskPath:nil];
     }
-    
-    // Enable NSUrl caching
-    NSURLCache *URLCache = [[NSURLCache alloc] initWithMemoryCapacity: 25 * 1024 * 1024 // 25mb (~1 model)
-                                                         diskCapacity: 100 * 1024 * 1024 // 100mb (~4 models)
-                                                             diskPath:nil];
-    [NSURLCache setSharedURLCache:URLCache];
-    
-    self.delegate = self;
-    self.debugOptions = ARSCNDebugOptionShowFeaturePoints;
-    self.autoenablesDefaultLighting = YES;
-    self.automaticallyUpdatesLighting = YES;
+    [NSURLCache setSharedURLCache:_urlCache];
+    if(!_loadedScenes || ![_loadedScenes count]){
+        _loadedScenes = [[NSMutableDictionary<NSString*,SCNScene*> alloc] init];
+    }
+    if(!_configuration){
+        _configuration = [ARWorldTrackingConfiguration new];
+        _configuration.planeDetection = ARPlaneDetectionHorizontal;
+    }
     
     SCNScene *scene = [SCNScene new];
     self.scene = scene;
-
-    ARWorldTrackingConfiguration *configuration = [ARWorldTrackingConfiguration new];
-    configuration.planeDetection = ARPlaneDetectionHorizontal;
+    self.delegate = self;
+//    self.debugOptions = ARSCNDebugOptionShowFeaturePoints;
+    self.autoenablesDefaultLighting = YES;
+    self.automaticallyUpdatesLighting = YES;
     
-    [self.session runWithConfiguration:configuration];
-    _sceneSet = YES;
-    
-    NSLog(@"InitOptions %@", _initOptions);
+    [self.session runWithConfiguration:_configuration];
+    _hasItem = NO;
 }
 
-- (void)setupCoachingOverlay API_AVAILABLE(ios(13.0)) {
+- (void)pause {
+    NSLog(@"Pausing setup");
+    [self.session pause];
+}
+
+- (void)setupCoachingOverlay {
     _arCoachingOverlay = [[ARCoachingOverlayView alloc] init];
+    _arCoachingOverlay.delegate = self;
     _arCoachingOverlay.session = self.session;
     _arCoachingOverlay.activatesAutomatically = YES;
     _arCoachingOverlay.goal = ARPlaneDetectionHorizontal;
@@ -82,56 +89,93 @@ int _updateCounter = 0;
     _placeMarker.opacity = 0.75;
     [self updateRaycastPoint];
     [self.scene.rootNode addChildNode:_placeMarker];
+    _sceneReady = YES;
+    [self sendMessage:@{
+      @"event": @"plane"
+    }];
 }
 
 - (void)updateRaycastPoint {
-    ARRaycastQuery *query = [self raycastQueryFromPoint:CGPointMake(center_x,center_y) allowingTarget:ARHitTestResultTypeEstimatedHorizontalPlane alignment:ARRaycastTargetAlignmentHorizontal];
+    ARRaycastQuery *query = [self raycastQueryFromPoint:CGPointMake(center_x,center_y) allowingTarget:ARRaycastTargetExistingPlaneGeometry alignment:ARRaycastTargetAlignmentHorizontal];
     NSArray<ARRaycastResult *> *results = [self.session raycast:query];
    
     if(results && [results count]){
-        _placement = SCNVector3Make(results[0].worldTransform.columns[3].x, results[0].worldTransform.columns[3].y, results[0].worldTransform.columns[3].z);
-        _placeMarker.position = _placement;
+        _placement = simd_make_float3(results[0].worldTransform.columns[3].x, results[0].worldTransform.columns[3].y, results[0].worldTransform.columns[3].z);
+        _placeMarker.simdPosition = _placement;
     }
 }
 
-- (void)initSceneFromUrl:(NSURL*) url API_AVAILABLE(ios(11.0)){
-    center_x = self.bounds.origin.x + self.bounds.size.width/2.0;
-    center_y = self.bounds.origin.y + self.bounds.size.height/2.0;
-    
-    // Only enable coaching overlay if enabled, and iOS > v13
-    if([_initOptions objectForKey:@"coachingOverlay"])
-        if(@available(iOS 13, *))
-           [self setupCoachingOverlay];
+- (void)initAssetFrom:(NSURL*)url forKey:(NSString*)key withOptions:(NSDictionary<NSString*,id>*)options {
+    if(_loadedScenes[key]){
+        NSLog(@"Scene %@ already exists", key);
+        [self sendMessage:@{
+          @"event": @"loaded",
+          @"asset": key
+        }];
+        return;
+    }
     
     [[self class] downloadAssetURL:url completionHandler:^(NSURL* location) {
         NSError *sceneError = nil;
-        _loadedScene = [SCNScene sceneWithURL:location options:nil error:&sceneError];
-        // [self placeLoadedSceneObjects];
+
+        SCNScene *scene = [SCNScene sceneWithURL:location options:nil error:&sceneError];
+        NSLog(@"Scene is %@", scene);
+        [_loadedScenes setObject:scene forKey:key];
+        NSLog(@"Set loadedScenes value for key %@", key);
+        NSLog(@"value is %@", _loadedScenes);
+        self.sceneTime = 0;
         
-        if(_planeAnchor){
-            [self sendMessage:@{
-              @"event": @"plane"
-            }];
-        }
         
+        [self addAnimationEventsOn:_loadedScenes[key].rootNode withKey:key];
+    
+        [self sendMessage:@{
+          @"event": @"loaded",
+          @"asset": key
+        }];
+                
         if(sceneError){
-            NSLog(@"Scene error!!! %@", sceneError);
+            NSLog(@"Scene error: %@", sceneError);
         }
     }];
 }
 
-- (void)placeLoadedSceneObjects API_AVAILABLE(ios(11.0)){
-    if(_loadedScene && _planeAnchor){
-        NSLog(@"Placing objects...");
+- (void)placeLoadedSceneObject:(NSString*)key withOptions:(NSDictionary<NSString*,id>*)options {
+    if(_sceneReady && _loadedScenes[key]){
         
-        float camAngle = self.session.currentFrame.camera.eulerAngles[1];
-        float scale = _initOptions[@"scale"] || 1.0;
-        for(SCNNode *node in _loadedScene.rootNode.childNodes){
-            node.position = _placement;
-            node.scale = SCNVector3Make(scale, scale, scale);
-            node.eulerAngles = SCNVector3Make(0, camAngle, 0);
-            [self.scene.rootNode addChildNode:node];
+        if(_currentItem){
+            NSLog(@"Removing current item %@", _currentItem);
+            [_loadedScenes[_currentItem].rootNode removeFromParentNode];
         }
+        
+        NSLog(@"Placing object %@...", key);
+        if(isnan(_camAngle))
+            _camAngle = self.session.currentFrame.camera.eulerAngles[1];
+        
+        float scale = [options objectForKey:@"scale"] ? [options[@"scale"] floatValue] : 1.0f;
+        NSLog(@"Rendering at scale %f", scale);
+        
+        _loadedScenes[key].rootNode.scale = SCNVector3Make(scale, scale, scale);
+        
+        NSDictionary<NSString*,id> *r = [options objectForKey:@"rotation"];
+        if(r && [r objectForKey:@"x"] && [r objectForKey:@"y"] && [r objectForKey:@"z"]){
+            NSLog(@"Applying rotation to %@ <%@,%@,%@>", key, r[@"x"], r[@"y"], r[@"z"]);
+            _loadedScenes[key].rootNode.eulerAngles = SCNVector3Make([r[@"x"] floatValue], _camAngle + [r[@"y"] floatValue], [r[@"z"] floatValue]);
+        }else{
+            _loadedScenes[key].rootNode.eulerAngles = SCNVector3Make(0, _camAngle, 0);
+        }
+        
+        NSDictionary<NSString*,id> *t = [options objectForKey:@"translation"];
+        if(t && [t objectForKey:@"x"] && [t objectForKey:@"y"] && [t objectForKey:@"z"]){
+            simd_float3 translation = simd_make_float3([t[@"x"] floatValue], [t[@"y"] floatValue], [t[@"z"] floatValue]);
+            NSLog(@"Applying translation to %@ <%f,%f,%f>", key, translation.x, translation.y, translation.z);
+            _loadedScenes[key].rootNode.simdPosition = _placement + translation;
+        }else{
+            _loadedScenes[key].rootNode.simdPosition = _placement;
+        }
+                
+        [self.scene.rootNode addChildNode:_loadedScenes[key].rootNode];
+        
+        _currentItem = key;
         
         if(_placeMarker){
             [_placeMarker removeFromParentNode];
@@ -141,17 +185,15 @@ int _updateCounter = 0;
         
         [self sendMessage:@{
           @"event": @"rendered",
-          @"extra": @"data",
-          @"statusCode": @200
+          @"asset": key
         }];
         
     }else{
-        if(_planeAnchor)
-            NSLog(@"Have anchor, waiting for scene...");
-        else if(_loadedScene)
-            NSLog(@"Have scene, waiting for anchor...");
-        else
-            NSLog(@"Waiting for scene and anchor");
+        if(!_sceneReady)
+            NSLog(@"Scene has not yet found a plane");
+        if(!_loadedScenes[key])
+            NSLog(@"No scene is available for %@", key);
+        NSLog(@"Loaded Scenes %@", _loadedScenes);
     }
 }
     
@@ -173,26 +215,60 @@ int _updateCounter = 0;
     
     NSString *action = message[@"data"][@"action"];
     if([action isEqualToString:@"init"]){
-        _initOptions = message[@"data"][@"options"];
-        
-        if(!_initOptions || !_initOptions[@"url"]){
-            NSLog(@"Error: Action is init, but no URL was provided.");
+        if(![data objectForKey:@"assets"]){
+            NSLog(@"Error: Action is init, but no assets were provided.");
             return;
         }
         
-        NSURL *url = [NSURL URLWithString:_initOptions[@"url"]];
-        if(!url){
-            NSLog(@"Error: Malformed URL for '%@' action: %@ ", action, _initOptions[@"url"]);
-            return;
+        center_x = self.bounds.origin.x + self.bounds.size.width/2.0;
+        center_y = self.bounds.origin.y + self.bounds.size.height/2.0;
+        NSLog(@"INIT XY (%f,%f)", center_x, center_y);
+        
+        NSDictionary<NSString *,id> *assets = [data objectForKey:@"assets"];
+        for(NSString *key in [assets keyEnumerator]){
+            NSURL *url = [NSURL URLWithString:assets[key][@"url"]];
+            if(!url){
+                NSLog(@"Error: Malformed URL for asset '%@': %@ ", key, assets[key][@"url"]);
+                return;
+            }
+            [self initAssetFrom:url forKey:key withOptions:assets[key]];
         }
         
-        [self initSceneFromUrl:url];
+        // Only enable coaching overlay if enabled, and iOS > v13
+       if([data objectForKey:@"coachingOverlay"])
+          [self setupCoachingOverlay];
+        
     }else if([action isEqualToString:@"place"]){
-        NSLog(@"Attempting to place object...");
-        [self placeLoadedSceneObjects];
+        NSLog(@"Attempting to place object %@", [data objectForKey:@"asset"]);
+        if(![data objectForKey:@"asset"]){
+            NSLog(@"'asset' is required");
+            return;
+        }
+        [self placeLoadedSceneObject:message[@"data"][@"asset"] withOptions:message[@"data"]];
+    }else if([action isEqualToString:@"play"]){
+        [[self class] playAllAnimationsOn:self.scene.rootNode withRepeat:[message[@"data"] objectForKey:@"loop"]];
     }else{
         NSLog(@"Error: Unrecognized action: %@", action);
     }
+}
+
+// MARK: - ARCoachingOverlayViewDelegate
+
+- (void)coachingOverlayViewWillActivate:(ARCoachingOverlayView *)coachingOverlayView {
+    NSLog(@"Coaching overlay shown");
+    _sceneReady = NO;
+    _hasItem = NO;
+    [self sendMessage:@{
+        @"event": @"overlyShown"
+    }];
+}
+
+- (void)coachingOverlayViewDidDeactivate:(ARCoachingOverlayView*)view {
+    NSLog(@"Coaching overlay hidden");
+    _sceneReady = YES;
+    [self sendMessage:@{
+      @"event": @"overlayHidden"
+    }];
 }
 
 // MARK: - ARSCNViewDelegate
@@ -200,38 +276,87 @@ int _updateCounter = 0;
 /**
  * SceneKit delegate methods
 **/
-- (void)renderer:(id<SCNSceneRenderer>)renderer didAddNode:(SCNNode *)node forAnchor:(ARAnchor *)anchor  API_AVAILABLE(ios(11.0)){
-    
-    if (_planeAnchor || ![anchor isKindOfClass:[ARPlaneAnchor class]]) {
-      return;
-    }
-    ARPlaneAnchor *plane = (ARPlaneAnchor*)anchor;
-    _planeAnchor = plane;
-    
+- (void)renderer:(id<SCNSceneRenderer>)renderer didAddNode:(SCNNode *)node forAnchor:(ARAnchor *)anchor {
+//    NSLog(@"SessionDelegate didAddNode %@ forAnchor %@", node, anchor);
     if(_placeMarker)
         [self updateRaycastPoint];
     else if(!_hasItem)
         [self setupRaycastPoint];
-    
-    if(_loadedScene){
-        [self sendMessage:@{
-          @"event": @"plane"
-        }];
-    }
 }
 
-- (void)renderer:(id<SCNSceneRenderer>)renderer didRemoveNode:(SCNNode *)node forAnchor:(ARAnchor *)anchor  API_AVAILABLE(ios(11.0)){
-    NSLog(@"Removed node! %@", node);
-    NSLog(@"On anchor: %@", anchor);
+- (void)renderer:(id<SCNSceneRenderer>)renderer didRemoveNode:(SCNNode *)node forAnchor:(ARAnchor *)anchor {
+//    NSLog(@"SessionDelegate didRemoveNode %@ forAnchor %@", node, anchor);
 }
 
 - (void)renderer:(id<SCNSceneRenderer>)renderer updateAtTime:(NSTimeInterval)time {
-    if(_placeMarker != nil)
-        [self updateRaycastPoint];
+    if(_placeMarker) [self updateRaycastPoint];
+}
+
+// MARK: - ARSessionObserver
+
+- (void)session:(ARSession *)session cameraDidChangeTrackingState:(ARCamera *)camera{
+//    NSLog(@"SessionDelegate session:%@ cameraDidChangeTrackingState: %@", session, camera);
+    if(camera.trackingState == ARTrackingStateNormal){
+        [self sendMessage:@{
+            @"event": @"tracking"
+        }];
+    }
+}
+- (void)sessionWasInterrupted:(ARSession *)session{
+//    NSLog(@"SessionDelegate sessionWasInterrupted: %@", session);
+}
+- (void)sessionInterruptionEnded:(ARSession *)session{
+//    NSLog(@"SessionDelegate sessionInterruptionEnded: %@", session);
+}
+- (void)session:(ARSession *)session didFailWithError:(NSError *)error{
+//    NSLog(@"SessionDelegate session:%@ didFailWithError: %@", session, error);
 }
 
 
 // MARK: - RCNARScene Helpers
+
+- (void)addAnimationEventsOn:(SCNNode*)node withKey:(NSString*)assetKey {
+    __block RCNARScene *blocksafeSelf = self;
+    for(SCNNode *n in node.childNodes){
+        for(NSString *key in n.animationKeys){
+            [n animationPlayerForKey:key].animation.repeatCount = 1;
+            NSLog(@"Adding for stop");
+            [n animationPlayerForKey:key].animation.animationDidStop = ^(SCNAnimation * _Nonnull animation, id<SCNAnimatable> _Nonnull receiver, BOOL completed){
+                [blocksafeSelf sendMessage:@{
+                    @"event": @"animation",
+                    @"asset": assetKey,
+                    @"animation": key,
+                    @"status": completed ? @"stopped" : @"started"
+                }];
+            };
+        }
+        [self addAnimationEventsOn:n withKey:assetKey];
+    }
+}
+
++(void)pauseAllAnimationsOn:(SCNNode*)node {
+    for(SCNNode *n in node.childNodes){
+        if(n.animationKeys.count > 0){
+            for(NSString *key in n.animationKeys){
+                [[n animationPlayerForKey:key] setPaused:YES];
+            }
+        }
+        [[self class] pauseAllAnimationsOn:n];
+    }
+}
++(void)playAllAnimationsOn:(SCNNode*)node withRepeat:(bool)repeat{
+    for(SCNNode *n in node.childNodes){
+       if(n.animationKeys.count > 0){
+           for(NSString *key in n.animationKeys){
+//               if(!repeat){
+                   [n animationPlayerForKey:key].animation.repeatCount = 1;
+//               }
+               [[n animationPlayerForKey:key] play];
+           }
+       }
+       [[self class] playAllAnimationsOn:n withRepeat:repeat];
+   }
+}
 
 + (void)downloadAssetURL:(NSURL*)remoteUrl completionHandler:(void(^)(NSURL*))handler {
     NSURL *cachedFileUrl = [[self class] checkCacheForURL:remoteUrl];
