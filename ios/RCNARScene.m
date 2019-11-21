@@ -35,8 +35,8 @@ int _updateCounter = 0;
 - (void)start {
     NSLog(@"Running AR...");
     if(!_urlCache){
-        _urlCache = [[NSURLCache alloc] initWithMemoryCapacity: 25 * 1024 * 1024 // 25mb (~1 model)
-                                                             diskCapacity: 100 * 1024 * 1024 // 100mb (~4 models)
+        _urlCache = [[NSURLCache alloc] initWithMemoryCapacity: 100 * 1024 * 1024 // 25mb (~5 models)
+                                                             diskCapacity: 400 * 1024 * 1024 // 400mb (~20 models)
                                                                  diskPath:nil];
     }
     [NSURLCache setSharedURLCache:_urlCache];
@@ -45,6 +45,7 @@ int _updateCounter = 0;
     }
     if(!_configuration){
         _configuration = [ARWorldTrackingConfiguration new];
+        _configuration.autoFocusEnabled = NO;
         _configuration.planeDetection = ARPlaneDetectionHorizontal;
     }
     
@@ -81,12 +82,12 @@ int _updateCounter = 0;
 }
 
 - (void)setupRaycastPoint {
-    SCNPlane *plane = [SCNPlane planeWithWidth:0.25 height:0.25];
+    SCNPlane *plane = [SCNPlane planeWithWidth:0.5 height:0.5];
     plane.firstMaterial.diffuse.contents = UIColor.blackColor;
-    plane.cornerRadius = 0.25;
+    plane.cornerRadius = 0.5;
     _placeMarker = [SCNNode nodeWithGeometry:plane];
     _placeMarker.eulerAngles = SCNVector3Make(-M_PI_2, 0, 0);
-    _placeMarker.opacity = 0.75;
+    _placeMarker.opacity = 0.85;
     [self updateRaycastPoint];
     [self.scene.rootNode addChildNode:_placeMarker];
     _sceneReady = YES;
@@ -102,6 +103,7 @@ int _updateCounter = 0;
     if(results && [results count]){
         _placement = simd_make_float3(results[0].worldTransform.columns[3].x, results[0].worldTransform.columns[3].y, results[0].worldTransform.columns[3].z);
         _placeMarker.simdPosition = _placement;
+        _camAngle = self.session.currentFrame.camera.eulerAngles[1];
     }
 }
 
@@ -148,9 +150,6 @@ int _updateCounter = 0;
         }
         
         NSLog(@"Placing object %@...", key);
-        if(isnan(_camAngle))
-            _camAngle = self.session.currentFrame.camera.eulerAngles[1];
-        
         float scale = [options objectForKey:@"scale"] ? [options[@"scale"] floatValue] : 1.0f;
         NSLog(@"Rendering at scale %f", scale);
         
