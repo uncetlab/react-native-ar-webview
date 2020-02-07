@@ -452,7 +452,8 @@ int _updateCounter = 0;
 }
 
 + (NSString*)getCacheFile:(NSURL*)remoteUrl forEtag:(NSString*)etag {
-    return [NSString stringWithFormat:@"%@-%@", [etag stringByReplacingOccurrencesOfString:@"\"" withString:@""], [remoteUrl lastPathComponent]];
+    return [NSString stringWithFormat:@"%@-%@", [[etag stringByReplacingOccurrencesOfString:@"\"" withString:@""]
+             stringByReplacingOccurrencesOfString:@"/" withString:@"-"], [remoteUrl lastPathComponent]];
 }
 
 + (NSURL*)getCacheFolder:(NSURL*)remoteUrl {
