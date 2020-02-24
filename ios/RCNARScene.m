@@ -14,7 +14,7 @@
 #include <math.h>
 #import "RCNARScene.h"
 
-#import "RNCWebView-Swift.h"
+#import "react_native_ar_webview-Swift.h"
 
 API_AVAILABLE(ios(13.0))
 @implementation RCNARScene
@@ -37,9 +37,9 @@ int _updateCounter = 0;
 - (void)start {
     NSLog(@"Running AR...");
     
-    ARManager *mgr = [[ARManager alloc] init];
-    [mgr printMsg];
-    
+    ARManager * manager = [[ARManager alloc] init];
+    [manager printMsg];
+        
     if(!_urlCache){
         _urlCache = [[NSURLCache alloc] initWithMemoryCapacity: 100 * 1024 * 1024 // 25mb (~5 models)
                                                              diskCapacity: 400 * 1024 * 1024 // 400mb (~20 models)

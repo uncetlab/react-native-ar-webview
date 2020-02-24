@@ -8,9 +8,9 @@
 
 import Foundation
 
-@objc class ARManager : NSObject {
+@objc public class ARManager : NSObject {
 
-    @objc func printMsg() {
+    @objc public func printMsg() {
         print("Test Printing From Swift");
     }
 }
