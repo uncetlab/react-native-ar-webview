@@ -5,7 +5,7 @@
   "typings": "index.d.ts",
   "author": "Peter Andringa <peter.andringa@unc.edu>",
   "license": "MIT",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "homepage": "https://github.com/uncetlab/react-native-ar-webview#readme",
   "scripts": {
     "ci": "CI=true && yarn lint && yarn test",
