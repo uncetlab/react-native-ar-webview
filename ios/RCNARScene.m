@@ -38,7 +38,7 @@ int _updateCounter = 0;
     NSLog(@"Running AR...");
     
     ARManager * manager = [[ARManager alloc] init];
-    [manager printMsg];
+    [manager start];
         
     if(!_urlCache){
         _urlCache = [[NSURLCache alloc] initWithMemoryCapacity: 100 * 1024 * 1024 // 25mb (~5 models)
