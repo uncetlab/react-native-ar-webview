@@ -1,14 +1,11 @@
 {
   "name": "react-native-ar-webview",
-  "description": "React Native WebView component for iOS, Android, and Windows 10 (coming soon)",
+  "description": "React Native WebView providing an interface to AR controllers.",
   "main": "index.js",
   "typings": "index.d.ts",
-  "author": "Jamon Holmgren <jamon@infinite.red>",
-  "contributors": [
-    "Thibault Malbranche <malbranche.thibault@gmail.com>"
-  ],
+  "author": "Peter Andringa <peter.andringa@unc.edu>",
   "license": "MIT",
-  "version": "7.4.3",
+  "version": "0.1.2",
   "homepage": "https://github.com/uncetlab/react-native-ar-webview#readme",
   "scripts": {
     "ci": "CI=true && yarn lint && yarn test",
@@ -17,10 +14,6 @@
     "build": "yarn tsc",
     "prepare": "yarn build",
     "test": "yarn jest"
-  },
-  "rn-docs": {
-    "title": "Webview",
-    "type": "Component"
   },
   "peerDependencies": {
     "react": "^16.0",
