@@ -9,6 +9,7 @@
 import Foundation;
 import UIKit;
 import RealityKit;
+import Combine;
 
 // Tag print statements with [SWIFT]
 func print(_ str: String) {
@@ -18,7 +19,7 @@ func print(_ str: String) {
 @available(iOS 13.0, *)
 @objc public class ARManager : UIView, ARCoachingOverlayViewDelegate, ARSessionDelegate {
     
-    var _loadedScenes: [String: Entity] = [:];
+    var _loadedEntities: [String: Entity] = [:];
     let _configuration = ARWorldTrackingConfiguration();
     var _webview: RNCWebView? = nil;
         
@@ -29,9 +30,13 @@ func print(_ str: String) {
     
     var _sceneReady = false;
     var _hasItem = false;
+    var _currentItem: String? = nil;
     var _placeMarker: ModelEntity? = nil;
     var _markerPos: simd_float4? = nil;
     var _camAngle: Float = 0.0;
+    
+    var _subscribers = Set<AnyCancellable>();
+
     
     // MARK: Public Objective-C API
     
@@ -117,7 +122,7 @@ func print(_ str: String) {
     
     // MARK: Private Lifecycle Methods
     func initAsset(fromUrl url:URL, forName:String, withOptions:[String:Any]){
-        guard (_loadedScenes[forName] == nil) else {
+        guard (_loadedEntities[forName] == nil) else {
             print("Error: Scene \(forName) already exists.");
             sendMessage([
                 "event": "loaded",
@@ -127,20 +132,26 @@ func print(_ str: String) {
         }
         
         downloadAsset(url, onComplete: {(location: URL) in
-            print("Setting up scene entity...");
+            print("Setting up scene entity from \(location.debugDescription)");
             
-            // TK Load URL into Scene
-            let newEntity = Entity();
+            DispatchQueue.main.async {
+                let loadRequest = Entity.loadAsync(contentsOf: location)
+                loadRequest.sink(receiveCompletion: { completion in
+                    print("COMPLETED LOAD");
+                }, receiveValue: { entity in
+                    print("Loaded entity \(forName)");
+                    
+                    self.addAnimationEvents(onNode:entity, forName:forName);
+                    self._loadedEntities[forName] = entity;
+
+                    self.sendMessage([
+                        "event": "loaded",
+                        "asset": forName
+                    ]);
+                    
+                }).store(in: &self._subscribers) // keep it alive
+            }
             
-            self.addAnimationEvents(onNode:newEntity, forName:forName);
-            
-            self._loadedScenes[forName] = newEntity;
-            
-            print("Loaded scene \(forName)");
-            self.sendMessage([
-                "event": "loaded",
-                "asset": forName
-            ]);
         });
     }
     
@@ -156,7 +167,60 @@ func print(_ str: String) {
     }
     
     func placeLoadedObject(_ name: String, withOptions: [String:Any]){
-        print("Placing loaded object: \(name)");
+        guard let entity = _loadedEntities[name],
+            let pos = _markerPos,
+            (_sceneReady) else {
+                if(!_sceneReady) {
+                    print("Scene has not yet found a plane.");
+                }
+                if(_loadedEntities[name] == nil) {
+                    print("Scene \(name) is not yet loaded.");
+                }
+                return;
+        }
+        
+        if let current = _currentItem,
+            let currentEntity = _loadedEntities[current] {
+            print("Removing current item \(current)");
+            currentEntity.removeFromParent();
+        }
+        
+        print("Placing loaded object \(name) at \(pos)");
+        
+        // Build transformations
+        
+        var scale: Float = withOptions["scale"] as? Float ?? 1.0;
+        if let s = withOptions["scale"] as? String, let f = Float(s) {
+            scale = f;
+        }else if let s = withOptions["scale"] as? CGFloat {
+            scale = Float(s);
+        }
+        entity.transform.scale = simd_float3(scale, scale, scale);
+        print("Compare incoming scale \(withOptions["scale"] ?? "nil") to entity \(scale) and final \(entity.transform.scale)");
+
+        
+        let rot = toSimd(json: withOptions["rotation"]) ?? simd_float3(0,0,0);
+        entity.transform.rotation = Transform(pitch: rot[0], yaw: rot[1] + _camAngle, roll: rot[2]).rotation;
+        print("Compare incoming rotation \(withOptions["rotation"] ?? "nil") to euler \(rot) and final \(entity.transform.rotation)");
+        
+        let translation = toSimd(json: withOptions["translation"]) ?? simd_float3(0,0,0);
+        entity.transform.translation = translation + simd_float3(pos[0], pos[1], pos[2]);
+        print("Compare incoming translation \(withOptions["translation"] ?? "nil") to computed \(translation) and final \(entity.transform.translation)");
+        
+        _arview.scene.anchors[_arview.scene.anchors.count-1].addChild(entity);
+        
+        if let shadow = _placeMarker {
+            shadow.removeFromParent();
+            _placeMarker = nil;
+        }
+        
+        _currentItem = name;
+        _hasItem = true;
+        
+        self.sendMessage([
+            "event": "rendered",
+            "asset": name
+        ]);
     }
     
     func playAllAnimations(withRepeat: Bool){
@@ -310,6 +374,30 @@ func checkCache(url: URL) -> URL? {
     }
     
     return nil;
+}
+
+func toSimd(json: Any?) -> simd_float3? {
+    guard let json = json as? [String:Any] else { return nil; }
+    
+    var floats = [String:Float]();
+    
+    for k in ["x", "y", "z"] {
+        if let str = json[k] as? String {
+            floats[k] = Float(str);
+        }else if let int = json[k] as? Int {
+            floats[k] = Float(int);
+        }else if let float = json[k] as? Float {
+            floats[k] = float;
+        }else if let cg = json[k] as? CGFloat {
+            floats[k] = Float(cg);
+        }else{
+            return nil;
+        }
+    }
+    print(floats)
+    guard let x = floats["x"], let y = floats["y"], let z = floats["z"] else { return nil; }
+    
+    return simd_float3(x,y,z);
 }
 
 func downloadAsset(_ remoteUrl: URL, onComplete: @escaping (URL) -> Void) {
