@@ -15,6 +15,8 @@
 
 #import "RCNARScene.h"
 
+#import "react_native_ar_webview-Swift.h"
+
 static NSTimer *keyboardTimer;
 static NSString *const MessageHandlerName = @"ARView";
 static NSURLCredential* clientAuthenticationCredential;
@@ -53,6 +55,7 @@ static NSDictionary* customCertificatesForHost;
 @property (nonatomic, copy) RCTDirectEventBlock onContentProcessDidTerminate;
 @property (nonatomic, copy) WKWebView *webView;
 @property (nonatomic, copy) RCNARScene *arScene;
+@property (nonatomic, copy) ARManager *arManager;
 @end
 
 @implementation RNCWebView
@@ -285,7 +288,12 @@ static NSDictionary* customCertificatesForHost;
     [_arScene.bottomAnchor constraintEqualToAnchor:self.bottomAnchor].active = YES;
     [_arScene.rightAnchor constraintEqualToAnchor:self.rightAnchor].active = YES;
     [_arScene start];
-
+      
+    // Swift version (TK remove above)
+    _arManager = [[ARManager alloc] init];
+    [_arManager attachWithWebview:self toFrame:self.frame];
+    // [self addSubview:[_arManager view]]
+      
     // add webview in front
     [self addSubview:_webView];
     [self setHideKeyboardAccessoryView: _savedHideKeyboardAccessoryView];
@@ -312,7 +320,8 @@ static NSDictionary* customCertificatesForHost;
     }
     
     if(_arScene){
-        [_arScene pause];
+        [_arScene pause]; // TK REMOVE THIS WHEN SWIFT IS DONE
+        [_arManager pause];
     }
 
     [super removeFromSuperview];
@@ -416,10 +425,9 @@ static NSDictionary* customCertificatesForHost;
 {
   NSMutableDictionary<NSString *, id> *event = [self baseEvent];
   [event addEntriesFromDictionary: @{@"data": message.body}];
-  [_arScene onMessage:event];
-  if (_onMessage != nil) {
-    _onMessage(event);
-  }
+  
+  [_arScene onMessage:event]; // TK REMOVE THIS WHEN SWIFT IS DONE
+  [_arManager notifyWithMessage:event];
 }
 
 /**
