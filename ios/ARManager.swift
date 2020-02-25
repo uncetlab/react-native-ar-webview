@@ -36,7 +36,9 @@ func print(_ str: String) {
     var _camAngle: Float = 0.0;
     
     var _subscribers = Set<AnyCancellable>();
-
+    
+    var _playingAnimations: [Entity: [AnimationPlaybackController]] = [:];
+    var _animationSubs: [Entity: Cancellable] = [:];
     
     // MARK: Public Objective-C API
     
@@ -106,13 +108,17 @@ func print(_ str: String) {
                 self.setupCoachingOverlay();
             }
         case "place":
-            guard let asset: String = data["asset"] as? String else {
-                print("Error: Asset name is required for 'place' actions. Data was: \(data)");
+            guard let asset: String = data["asset"] as? String,
+                let entity = _loadedEntities[asset] else {
+                print("Error: Loaded asset name is required for 'place' actions. Data was: \(data)");
                 return;
             }
             NSLog("Attempting to place object \(asset)");
             
             self.placeLoadedObject(asset, withOptions: data);
+            if(data["play"] != nil) {
+                self.playAllAnimations(onNode: entity, withRepeat: (data["loop"] != nil))
+            }
         case "play":
             self.playAllAnimations(withRepeat: (data["loop"] != nil));
         default:
@@ -141,9 +147,8 @@ func print(_ str: String) {
                 }, receiveValue: { entity in
                     print("Loaded entity \(forName)");
                     
-                    self.addAnimationEvents(onNode:entity, forName:forName);
+                    entity.name = forName;
                     self._loadedEntities[forName] = entity;
-
                     self.sendMessage([
                         "event": "loaded",
                         "asset": forName
@@ -223,8 +228,36 @@ func print(_ str: String) {
         ]);
     }
     
+    func playAllAnimations(onNode: Entity, withRepeat: Bool){
+        
+        // Recur first
+        for child in onNode.children {
+            self.playAllAnimations(onNode: child, withRepeat: withRepeat);
+        }
+        
+        guard(onNode.availableAnimations.count > 0) else { return };
+        
+        if(_playingAnimations[onNode] == nil) {
+            _playingAnimations[onNode] = [];
+        }
+        if(_animationSubs[onNode] == nil){
+            self.addAnimationEvents(onNode: onNode, forName: onNode.name)
+        }
+        
+        for anim in onNode.availableAnimations {
+            var newAnim = anim.repeat(count: 1);
+            if(withRepeat){
+                newAnim = anim.repeat(duration: .infinity);
+            }
+            _playingAnimations[onNode]!.append(onNode.playAnimation(newAnim));
+        }
+    }
+    
     func playAllAnimations(withRepeat: Bool){
-        print("Playing animations withRepeat \(withRepeat)");
+        print("Playing all animations withRepeat \(withRepeat)");
+        for anchor in _arview.scene.anchors {
+            self.playAllAnimations(onNode: anchor, withRepeat: withRepeat);
+        }
     }
     
     // MARK: - Coaching Overlay Delegate
@@ -334,7 +367,14 @@ func print(_ str: String) {
     }
     
     func addAnimationEvents(onNode: Entity, forName: String){
-        print("Preparing animation events for node \(forName)");
+        _animationSubs[onNode] =
+        _arview.scene.subscribe(to: AnimationEvents.PlaybackCompleted.self, on: onNode) { (evt) in
+            self.sendMessage([
+                "event": "animation",
+                "asset": onNode.name,
+                "status": "stopped"
+            ]);
+        }
     }
     
     func sendMessage(_ data: [String: Any]){
