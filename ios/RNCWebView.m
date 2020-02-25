@@ -278,21 +278,28 @@ static NSDictionary* customCertificatesForHost;
 #endif
       
     // initialize AR scene
-    _arScene = [[RCNARScene alloc] init];
-    _arScene.webview = self;
-    _arScene.translatesAutoresizingMaskIntoConstraints = NO;
-
-    [self addSubview:_arScene];
-    [_arScene.topAnchor constraintEqualToAnchor:self.topAnchor].active = YES;
-    [_arScene.leftAnchor constraintEqualToAnchor:self.leftAnchor].active = YES;
-    [_arScene.bottomAnchor constraintEqualToAnchor:self.bottomAnchor].active = YES;
-    [_arScene.rightAnchor constraintEqualToAnchor:self.rightAnchor].active = YES;
-    [_arScene start];
+//    _arScene = [[RCNARScene alloc] init];
+//    _arScene.webview = self;
+//    _arScene.translatesAutoresizingMaskIntoConstraints = NO;
+//
+//    [self addSubview:_arScene];
+//    [_arScene.topAnchor constraintEqualToAnchor:self.topAnchor].active = YES;
+//    [_arScene.leftAnchor constraintEqualToAnchor:self.leftAnchor].active = YES;
+//    [_arScene.bottomAnchor constraintEqualToAnchor:self.bottomAnchor].active = YES;
+//    [_arScene.rightAnchor constraintEqualToAnchor:self.rightAnchor].active = YES;
+//    [_arScene start];
       
     // Swift version (TK remove above)
     _arManager = [[ARManager alloc] init];
-    [_arManager attachWithWebview:self toFrame:self.frame];
-    // [self addSubview:[_arManager view]]
+      
+    _arManager.translatesAutoresizingMaskIntoConstraints = NO;
+    [self addSubview:_arManager];
+    [_arManager.topAnchor constraintEqualToAnchor:self.topAnchor].active = YES;
+    [_arManager.leftAnchor constraintEqualToAnchor:self.leftAnchor].active = YES;
+    [_arManager.bottomAnchor constraintEqualToAnchor:self.bottomAnchor].active = YES;
+    [_arManager.rightAnchor constraintEqualToAnchor:self.rightAnchor].active = YES;
+      
+    [_arManager attachWithWebview:self];
       
     // add webview in front
     [self addSubview:_webView];
@@ -319,8 +326,8 @@ static NSDictionary* customCertificatesForHost;
         _webView = nil;
     }
     
-    if(_arScene){
-        [_arScene pause]; // TK REMOVE THIS WHEN SWIFT IS DONE
+    if(_arManager){
+//        [_arScene pause]; // TK REMOVE THIS WHEN SWIFT IS DONE
         [_arManager pause];
     }
 
@@ -426,7 +433,7 @@ static NSDictionary* customCertificatesForHost;
   NSMutableDictionary<NSString *, id> *event = [self baseEvent];
   [event addEntriesFromDictionary: @{@"data": message.body}];
   
-  [_arScene onMessage:event]; // TK REMOVE THIS WHEN SWIFT IS DONE
+//  [_arScene onMessage:event]; // TK REMOVE THIS WHEN SWIFT IS DONE
   [_arManager notifyWithMessage:event];
 }
 

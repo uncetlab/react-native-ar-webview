@@ -16,47 +16,56 @@ func print(_ str: String) {
 }
 
 @available(iOS 13.0, *)
-@objc public class ARManager : NSObject {
+@objc public class ARManager : UIView, ARCoachingOverlayViewDelegate, ARSessionDelegate {
     
     var _loadedScenes: [String: Entity] = [:];
     let _configuration = ARWorldTrackingConfiguration();
     var _webview: RNCWebView? = nil;
-    
-    var _hasItem = false;
-    
+        
     var _arview = ARView(frame: CGRect());
     
     var _center_x = CGFloat(0);
     var _center_y = CGFloat(0);
     
+    var _sceneReady = false;
+    var _hasItem = false;
+    var _placeMarker: ModelEntity? = nil;
+    var _markerPos: simd_float4? = nil;
+    var _camAngle: Float = 0.0;
+    
     // MARK: Public Objective-C API
     
     // Method to link with our WebView
-    @objc public func attach(webview: RNCWebView, toFrame:CGRect) {
+    @objc public func attach(webview: RNCWebView) {
         print("Attaching AR from Swift...");
         
         URLCache.shared = URLCache(memoryCapacity: 100 * 1024 * 1024, diskCapacity: 400 * 1024 * 1024);
         
-        self._arview.frame = toFrame;
         self._webview = webview;
         
+        // layout arview
+        self._arview.frame = self.frame;
+        self._arview.translatesAutoresizingMaskIntoConstraints = false;
+        self.addSubview(_arview);
+        _arview.topAnchor.constraint(equalTo: self.topAnchor).isActive = true;
+        _arview.leftAnchor.constraint(equalTo: self.leftAnchor).isActive = true;
+        _arview.bottomAnchor.constraint(equalTo: self.bottomAnchor).isActive = true;
+        _arview.rightAnchor.constraint(equalTo: self.rightAnchor).isActive = true;
+        
+        // start ar camera + rendering
         _configuration.isAutoFocusEnabled = false;
         _configuration.planeDetection = .horizontal;
-//        self._arview?.session.run(_configuration);
-    }
-    
-    @objc public func view() -> UIView {
-        return self._arview;
+        self._arview.session.delegate = self;
+        self._arview.session.run(_configuration);
     }
     
     @objc public func pause() {
         print("Pausing Swift setup");
-//        self._arview.session.pause();
+        self._arview.session.pause();
     }
     
     // Public method to recieve messages from WebView
     @objc public func notify(message: [String:Any]){
-        print("Got Swift message \(message)");
         
         guard let data: [String:Any] = message["data"] as? [String : Any] else {
             print("Error: no data object included in message \(message)");
@@ -136,7 +145,14 @@ func print(_ str: String) {
     }
     
     func setupCoachingOverlay(){
-        print("Setting up coaching overlay...")
+        print("Setting up coaching overlay...");
+        let overlay = ARCoachingOverlayView(frame: self.frame);
+        overlay.delegate = self;
+        overlay.session = self._arview.session;
+        overlay.activatesAutomatically = true;
+        overlay.goal = .horizontalPlane;
+        
+        self.addSubview(overlay);
     }
     
     func placeLoadedObject(_ name: String, withOptions: [String:Any]){
@@ -147,7 +163,112 @@ func print(_ str: String) {
         print("Playing animations withRepeat \(withRepeat)");
     }
     
+    // MARK: - Coaching Overlay Delegate
+    
+    public func coachingOverlayViewWillActivate(_ coachingOverlayView: ARCoachingOverlayView) {
+        print("Coaching overlay view active");
+        self._sceneReady = false;
+        self._hasItem = false;
+        self.sendMessage(["event": "overlayShown"]);
+    }
+    
+    public func coachingOverlayViewDidDeactivate(_ coachingOverlayView: ARCoachingOverlayView) {
+        print("Coaching overlay view deactivated");
+        self._sceneReady = true;
+        self.sendMessage(["event": "overlayHidden"]);
+    }
+    
+    public func coachingOverlayViewDidRequestSessionReset(_ coachingOverlayView: ARCoachingOverlayView) {
+        print("User wants to reset coaching overlay view");
+        self._sceneReady = false;
+        self.sendMessage(["event": "overlayReset"]);
+    }
+    
+    // MARK: ARSessionObserver
+
+    public func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
+        print("Found \(anchors.count) anchors.")
+        
+        // Add non-existing anchors to scene
+        let currentIds = _arview.scene.anchors.map{ $0.anchorIdentifier }
+        for anchor in anchors where !currentIds.contains(anchor.identifier){
+            _arview.scene.addAnchor(AnchorEntity(anchor: anchor));
+        }
+        
+        if(_placeMarker != nil) {
+            self.updateRaycastPoint();
+        }else if(!_hasItem){
+            self.setupRaycastPoint();
+        }
+    }
+    
+    public func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        if(_placeMarker != nil){
+            self.updateRaycastPoint();
+        }
+    }
+    
+    public func session(_ session: ARSession, didRemove anchors: [ARAnchor]) {
+        print("Removing \(anchors.count) anchors.");
+        
+        // Remove anchors from scene too
+        let currentIds = _arview.scene.anchors.map{ $0.anchorIdentifier }
+        for anchor in anchors {
+            if let i = currentIds.firstIndex(of: anchor.identifier) {
+                _arview.scene.removeAnchor(_arview.scene.anchors[i]);
+            }
+        }
+    }
+    
+    public func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
+        if case .normal = camera.trackingState {
+            self.sendMessage(["event": "tracking"]);
+        }
+    }
+    
+    public func sessionWasInterrupted(_ session: ARSession) {
+        print("AR session was interrupted.");
+        self.sendMessage(["event": "interrupted"]);
+    }
+    
+    public func sessionInterruptionEnded(_ session: ARSession) {
+        print("AR session interruption ended.");
+        self.sendMessage(["event": "interruptionEnded"]);
+    }
+    
+    public func session(_ session: ARSession, didFailWithError error: Error) {
+        print("AR session failed with error");
+        self.sendMessage(["event": "error", "message": "\(error)"]);
+    }
+    
     // MARK: Private Instance Methods
+    func setupRaycastPoint(){
+        print("Attempting to set up raycast point.");
+        print("Scene anchors so far: \(_arview.scene.anchors.count)");
+        
+        let shadowMesh = MeshResource.generatePlane(width: 0.5, depth: 0.5, cornerRadius: 0.5);
+        let shadowMat = UnlitMaterial(color: UIColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.85));
+        
+        _placeMarker = ModelEntity(mesh: shadowMesh, materials: [shadowMat]);
+        
+        self.updateRaycastPoint();
+        _arview.scene.anchors[_arview.scene.anchors.count - 1].addChild(_placeMarker!);
+        self._sceneReady = true;
+        
+        self.sendMessage(["event": "plane"]);
+    }
+    func updateRaycastPoint(){
+        guard let shadow = _placeMarker else { return; }
+        
+        let hits = self._arview.raycast(from: CGPoint(x: _center_x,y: _center_y), allowing: .existingPlaneGeometry, alignment: .horizontal);
+        
+        if(hits.count > 0) {
+            _markerPos = hits[0].worldTransform.columns.3;
+            _camAngle = self._arview.session.currentFrame!.camera.eulerAngles[1]
+            shadow.setPosition(SIMD3(_markerPos!.x, _markerPos!.y, _markerPos!.z), relativeTo: nil);
+        }
+    }
+    
     func addAnimationEvents(onNode: Entity, forName: String){
         print("Preparing animation events for node \(forName)");
     }
@@ -158,7 +279,7 @@ func print(_ str: String) {
     }
 }
 
-// MARK: Helper Methods
+// MARK: - Helper Methods
 
 // Returns the local folder for a remote URL
 func getCacheFolder(url: URL) -> URL? {
@@ -221,7 +342,7 @@ func downloadAsset(_ remoteUrl: URL, onComplete: @escaping (URL) -> Void) {
         
         // Server matches ours, so just return ours.
         if(httpResponse.statusCode == 304) {
-            print("Returning cached file url: \(cachedFileUrl!)");
+            print("Returning cached file url: \(cachedFileUrl!.lastPathComponent)");
             return onComplete(cachedFileUrl!);
         }
         
