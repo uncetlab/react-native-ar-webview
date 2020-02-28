@@ -85,7 +85,7 @@ func print(_ str: String) {
         }
         
         switch action {
-        case "init":
+        case "preload":
             guard let assets: [String: [String:Any]] = data["assets"] as? [String: [String:Any]] else {
                 print("Erorr: Init requires a dictionary of asset names -> {}");
                 return;
@@ -103,10 +103,18 @@ func print(_ str: String) {
                 }
                 self.initAsset(fromUrl: url, forName: name, withOptions:asset_data);
             }
-            
-            if (data["coachingOverlay"] != nil) {
+        case "showOverlay":
+//            if(_arview.scene.anchors.count == 0){
+                print("Showing coaching overlay...");
                 self.setupCoachingOverlay();
-            }
+//            }else{
+//                print("Skipping overlay, becuase we already have an anchor.");
+//                self.sendMessage(["event": "hideOverlay"]);
+//            }
+            
+        case "placeTarget":
+            print("Placing target...");
+            self.setupRaycastPoint();
         case "place":
             guard let asset: String = data["asset"] as? String,
                 let entity = _loadedEntities[asset] else {
@@ -118,6 +126,20 @@ func print(_ str: String) {
             self.placeLoadedObject(asset, withOptions: data);
             if(data["play"] != nil) {
                 self.playAllAnimations(onNode: entity, withRepeat: (data["loop"] != nil))
+            }
+        case "hide":
+            if let asset: String = data["asset"] as? String, let entity = _loadedEntities[asset] {
+                print("Hiding specified object");
+                self.hideObject(entity: entity);
+            }else if let current = _currentItem, let currentEntity = _loadedEntities[current] {
+                print("Hiding current object");
+                self.hideObject(entity: currentEntity);
+            }else if let shadow = _placeMarker {
+                print("Hiding place marker");
+                self.hideObject(entity: shadow);
+                _placeMarker = nil;
+            }else {
+                print("Error: there is no object to hide.");
             }
         case "play":
             self.playAllAnimations(withRepeat: (data["loop"] != nil));
@@ -169,6 +191,8 @@ func print(_ str: String) {
         overlay.goal = .horizontalPlane;
         
         self.addSubview(overlay);
+        
+        overlay.setActive(true, animated: true);
     }
     
     func placeLoadedObject(_ name: String, withOptions: [String:Any]){
@@ -225,6 +249,18 @@ func print(_ str: String) {
         self.sendMessage([
             "event": "rendered",
             "asset": name
+        ]);
+    }
+    
+    func hideObject(entity: Entity){
+        print("Removing entity \(entity.name)");
+        entity.removeFromParent();
+        if(_currentItem == entity.name) {
+            _currentItem = nil;
+        }
+        self.sendMessage([
+            "event": "hidden",
+            "asset": entity.name
         ]);
     }
     
@@ -291,11 +327,11 @@ func print(_ str: String) {
         for anchor in anchors where !currentIds.contains(anchor.identifier){
             _arview.scene.addAnchor(AnchorEntity(anchor: anchor));
         }
-        
+    
         if(_placeMarker != nil) {
             self.updateRaycastPoint();
         }else if(!_hasItem){
-            self.setupRaycastPoint();
+            self.sendMessage(["event": "plane"]); // Tell frontend we're ready to place
         }
     }
     
@@ -342,6 +378,14 @@ func print(_ str: String) {
     func setupRaycastPoint(){
         print("Attempting to set up raycast point.");
         print("Scene anchors so far: \(_arview.scene.anchors.count)");
+        guard _arview.scene.anchors.count > 0 else {
+            print("Refusing to place raycast until there's an anchor or no existing place marker.");
+            return;
+        }
+        
+        if let marker = _placeMarker {
+            marker.removeFromParent();
+        }
         
         let shadowMesh = MeshResource.generatePlane(width: 0.5, depth: 0.5, cornerRadius: 0.5);
         let shadowMat = UnlitMaterial(color: UIColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.85));
@@ -351,8 +395,6 @@ func print(_ str: String) {
         self.updateRaycastPoint();
         _arview.scene.anchors[_arview.scene.anchors.count - 1].addChild(_placeMarker!);
         self._sceneReady = true;
-        
-        self.sendMessage(["event": "plane"]);
     }
     func updateRaycastPoint(){
         guard let shadow = _placeMarker else { return; }
